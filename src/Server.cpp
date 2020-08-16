@@ -23,21 +23,40 @@
 // WebSocketClient: https://github.com/Links2004/arduinoWebSockets/issues/119
 
 #include "Server.h"
+#include "ServerEmbeddedFiles.h"
 #include "WebHandler.h"
 #include "Cloud.h"
 #include "system/SystemBase.h"
 #include "DbgPrint.h"
 #include "Settings.h"
 #include "RecoveryMode.h"
+#include "ArduinoLog.h"
 #include <SPIFFS.h>
 
 // include html files
-#include "webui/index.html.gz.h"
 #include "webui/fwupdate.html.gz.h"
 #include "webui/displayupdate.html.gz.h"
 #include "webui/restart.html.gz.h"
 
 #define DEFAULT_PASSWORD "admin"
+
+typedef struct
+{
+  const char *path;
+  const char *contentType;
+  const uint8_t *data;
+  const size_t size;
+} CompressedWebDataType;
+
+const CompressedWebDataType webFiles[] = {
+    {"/css/app.css", "text/css", css_app_css_start, (const size_t)&css_app_css_size},
+    {"/img/logo_nano.svg", "image/svg+xml", img_logo_nano_svg_start, (const size_t)&img_logo_nano_svg_size},
+    {"/js/app.js", "text/javascript", js_app_js_start, (const size_t)&js_app_js_size},
+    {"/js/app.js.map", "text/javascript", js_app_js_map_start, (const size_t)&js_app_js_map_size},
+    {"/js/chunk-vendors.js", "text/javascript", js_chunk_vendors_js_start, (const size_t)&js_chunk_vendors_js_size},
+    {"/js/chunk-vendors.js.map", "text/javascript", js_chunk_vendors_js_map_start, (const size_t)&js_chunk_vendors_js_map_size},
+    {"/index.html", "text/html", index_html_start, (const size_t)&index_html_size},
+    {"/", "text/html", index_html_start, (const size_t)&index_html_size}};
 
 const char *WServer::username = "admin";
 String WServer::password = DEFAULT_PASSWORD;
@@ -139,17 +158,27 @@ void WServer::init()
     request->send(200, TEXTPLAIN, response);
   });
 
-  // to avoid multiple requests to ESP
-  webServer->on("/", [](AsyncWebServerRequest *request) {
-    AsyncWebServerResponse *response = request->beginResponse_P(200, "text/html", index_html_gz, sizeof(index_html_gz));
-    response->addHeader("Content-Disposition", "inline; filename=\"index.html\"");
-    response->addHeader("Content-Encoding", "gzip");
-    request->send(response);
-  });
-
   // 404 NOT found: called when the url is not defined here
   webServer->onNotFound([](AsyncWebServerRequest *request) {
-    request->send(404);
+    boolean notFound = true;
+    Serial.println(request->url());
+    
+    for(uint8_t i = 0u; i < (sizeof(webFiles)/sizeof(CompressedWebDataType)); i++)
+    {
+      if(request->url() == webFiles[i].path)
+      {
+        AsyncWebServerResponse *response = request->beginResponse_P(200, webFiles[i].contentType, webFiles[i].data, webFiles[i].size);
+        response->addHeader("Content-Encoding", "gzip");
+        request->send(response);
+        notFound = false;
+        break;
+      }
+    }
+
+    if(true == notFound)
+    {
+      request->send(404);
+    }
   });
 
   webServer->begin();
